@@ -85,9 +85,18 @@ PDF_MIME_TYPES = [
 # 常用测试网站列表，用于验证网络连接
 NETWORK_TEST_SITES = [
     "https://www.google.com",
-    "https://www.github.com",
+    "https://www.bing.com", 
     "https://www.microsoft.com",
+    "https://www.cloudflare.com",
+    "https://www.example.com", # 极其简单的测试站点
+    "https://www.baidu.com",   # 中国地区可访问
 ]
+
+# 网络验证的超时时间和重试次数
+NETWORK_TEST_TIMEOUT = 5  # 秒
+NETWORK_TEST_RETRY = 2    # 重试次数
+# 默认是否强制要求网络验证通过
+DEFAULT_REQUIRE_NETWORK_VALIDATION = False
 
 
 class WEB_CONNECTOR_VALID_SETTINGS(str, Enum):
@@ -164,22 +173,44 @@ def check_internet_connection(url: str) -> None:
         raise Exception(f"Unable to reach {url} - check your internet connection: {e}")
 
 
-def verify_network_connectivity() -> Tuple[bool, List[str]]:
+def verify_network_connectivity() -> Tuple[bool, List[str], List[str]]:
     """
     验证网络连接状态，通过测试多个常见网站
     
     返回:
-        Tuple[bool, List[str]]: (连接状态, 错误信息列表)
+        Tuple[bool, List[str], List[str]]: (连接状态, 可访问网站列表, 错误信息列表)
     """
     errors = []
-    for site in NETWORK_TEST_SITES:
-        try:
-            logger.info(f"测试网络连接到 {site}")
-            requests.get(site, timeout=5, headers=DEFAULT_HEADERS)
-        except Exception as e:
-            errors.append(f"无法连接到 {site}: {str(e)}")
+    succeeded = []
     
-    return len(errors) == 0, errors
+    logger.info(f"开始网络连接测试，测试目标: {', '.join(NETWORK_TEST_SITES)}")
+    
+    for site in NETWORK_TEST_SITES:
+        for attempt in range(NETWORK_TEST_RETRY):
+            try:
+                logger.info(f"测试网络连接到 {site} (尝试 {attempt+1}/{NETWORK_TEST_RETRY})")
+                response = requests.get(site, timeout=NETWORK_TEST_TIMEOUT, headers=DEFAULT_HEADERS)
+                status_code = response.status_code
+                succeeded.append(f"{site} (HTTP {status_code})")
+                logger.info(f"成功连接到 {site}, 状态码: {status_code}")
+                break  # 成功则退出重试循环
+            except Exception as e:
+                error_message = f"无法连接到 {site}: {str(e)}"
+                if attempt == NETWORK_TEST_RETRY - 1:  # 最后一次尝试失败
+                    errors.append(error_message)
+                    logger.warning(error_message)
+                else:
+                    logger.info(f"尝试 {attempt+1} 失败: {error_message}，将重试")
+    
+    # 只要有一个网站可以连接，我们就认为网络是可用的
+    network_ok = len(succeeded) > 0
+    
+    if network_ok:
+        logger.info(f"网络连接验证部分成功，可连接网站: {', '.join(succeeded)}")
+    else:
+        logger.error("网络连接验证完全失败，所有测试网站均无法连接")
+    
+    return network_ok, succeeded, errors
 
 
 def is_valid_url(url: str) -> bool:
@@ -335,6 +366,7 @@ class WebConnector(LoadConnector):
         mintlify_cleanup: bool = True,  # Mostly ok to apply to other websites as well
         batch_size: int = INDEX_BATCH_SIZE,
         scroll_before_scraping: bool = False,
+        require_network_validation: bool = DEFAULT_REQUIRE_NETWORK_VALIDATION,
         **kwargs: Any,
     ) -> None:
         self.mintlify_cleanup = mintlify_cleanup
@@ -342,6 +374,7 @@ class WebConnector(LoadConnector):
         self.recursive = False
         self.scroll_before_scraping = scroll_before_scraping
         self.web_connector_type = web_connector_type
+        self.require_network_validation = require_network_validation
 
         if web_connector_type == WEB_CONNECTOR_VALID_SETTINGS.RECURSIVE.value:
             self.recursive = True
@@ -381,13 +414,34 @@ class WebConnector(LoadConnector):
         """Traverses through all pages found on the website
         and converts them into documents"""
         # 首先验证网络连接
-        network_ok, errors = verify_network_connectivity()
-        if not network_ok:
-            error_msg = "网络连接验证失败，无法继续索引。详细错误: " + ", ".join(errors)
+        network_ok, succeeded_sites, errors = verify_network_connectivity()
+        
+        # 记录网络测试结果
+        network_status_msg = (
+            f"网络连接验证结果: {'成功' if network_ok else '失败'}\n"
+            f"可访问网站: {', '.join(succeeded_sites) if succeeded_sites else '无'}\n"
+            f"失败网站: {', '.join(errors) if errors else '无'}"
+        )
+        logger.info(network_status_msg)
+        
+        # 如果网络验证失败且设置了强制要求网络验证通过，则抛出错误
+        if not network_ok and self.require_network_validation:
+            error_msg = (
+                f"网络连接验证失败，无法继续索引。\n"
+                f"详细错误: {', '.join(errors)}\n"
+                f"如果您想忽略网络验证继续操作，请将 require_network_validation 参数设置为 False"
+            )
             logger.error(error_msg)
             raise RuntimeError(error_msg)
-        
-        logger.info("网络连接验证成功，开始抓取页面")
+        elif not network_ok:
+            warning_msg = (
+                f"网络连接验证失败，但将继续尝试索引。\n"
+                f"请注意，这可能会导致索引过程失败或不完整。\n"
+                f"详细错误: {', '.join(errors)}"
+            )
+            logger.warning(warning_msg)
+        else:
+            logger.info("网络连接验证成功，开始抓取页面")
             
         visited_links: set[str] = set()
         to_visit: list[str] = self.to_visit_list
