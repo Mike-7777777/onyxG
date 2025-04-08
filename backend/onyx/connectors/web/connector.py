@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any
 from typing import cast
 from typing import Tuple
+from typing import List
 from urllib.parse import urljoin
 from urllib.parse import urlparse
 
@@ -79,6 +80,13 @@ PDF_MIME_TYPES = [
     "application/vnd.pdf",
     "text/pdf",
     "text/x-pdf",
+]
+
+# 常用测试网站列表，用于验证网络连接
+NETWORK_TEST_SITES = [
+    "https://www.google.com",
+    "https://www.github.com",
+    "https://www.microsoft.com",
 ]
 
 
@@ -154,6 +162,24 @@ def check_internet_connection(url: str) -> None:
         raise Exception(f"SSL error {str(cause)}")
     except (requests.RequestException, ValueError) as e:
         raise Exception(f"Unable to reach {url} - check your internet connection: {e}")
+
+
+def verify_network_connectivity() -> Tuple[bool, List[str]]:
+    """
+    验证网络连接状态，通过测试多个常见网站
+    
+    返回:
+        Tuple[bool, List[str]]: (连接状态, 错误信息列表)
+    """
+    errors = []
+    for site in NETWORK_TEST_SITES:
+        try:
+            logger.info(f"测试网络连接到 {site}")
+            requests.get(site, timeout=5, headers=DEFAULT_HEADERS)
+        except Exception as e:
+            errors.append(f"无法连接到 {site}: {str(e)}")
+    
+    return len(errors) == 0, errors
 
 
 def is_valid_url(url: str) -> bool:
@@ -354,6 +380,15 @@ class WebConnector(LoadConnector):
     def load_from_state(self) -> GenerateDocumentsOutput:
         """Traverses through all pages found on the website
         and converts them into documents"""
+        # 首先验证网络连接
+        network_ok, errors = verify_network_connectivity()
+        if not network_ok:
+            error_msg = "网络连接验证失败，无法继续索引。详细错误: " + ", ".join(errors)
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
+        
+        logger.info("网络连接验证成功，开始抓取页面")
+            
         visited_links: set[str] = set()
         to_visit: list[str] = self.to_visit_list
         content_hashes = set()
