@@ -1,3 +1,4 @@
+import time
 import traceback
 from collections import defaultdict
 from collections.abc import Callable
@@ -172,9 +173,9 @@ def _translate_citations(
     citation_to_saved_doc_id_map: dict[int, int] = {}
     for citation in citations_list:
         if citation.citation_num not in citation_to_saved_doc_id_map:
-            citation_to_saved_doc_id_map[
-                citation.citation_num
-            ] = doc_id_to_saved_doc_id_map[citation.document_id]
+            citation_to_saved_doc_id_map[citation.citation_num] = (
+                doc_id_to_saved_doc_id_map[citation.document_id]
+            )
 
     return MessageSpecificCitations(citation_map=citation_to_saved_doc_id_map)
 
@@ -730,9 +731,9 @@ def stream_chat_message_objects(
             else reserve_message_id(
                 db_session=db_session,
                 chat_session_id=chat_session_id,
-                parent_message=user_message.id
-                if user_message is not None
-                else parent_message.id,
+                parent_message=(
+                    user_message.id if user_message is not None else parent_message.id
+                ),
                 message_type=MessageType.ASSISTANT,
             )
         )
@@ -794,10 +795,10 @@ def stream_chat_message_objects(
                 final_msg.prompt,
                 prompt_override=prompt_override,
             )
-        elif final_msg.prompt:
-            prompt_config = PromptConfig.from_model(final_msg.prompt)
         else:
-            prompt_config = PromptConfig.from_model(persona.prompts[0])
+            prompt_config = PromptConfig.from_model(
+                final_msg.prompt or persona.prompts[0]
+            )
 
         answer_style_config = AnswerStyleConfig(
             citation_config=CitationConfig(
@@ -914,6 +915,7 @@ def stream_chat_message_objects(
                     retrieval_options.filters.user_folder_ids = user_folder_ids
 
                     # Create override kwargs for the search tool
+
                     override_kwargs = SearchToolOverrideKwargs(
                         force_no_rerank=search_for_ordering_only,  # Skip reranking for ordering-only
                         alternate_db_session=None,
@@ -1095,9 +1097,9 @@ def stream_chat_message_objects(
                             and retrieval_options.dedupe_docs
                         ),
                         user_files=user_file_files if search_for_ordering_only else [],
-                        loaded_user_files=user_files
-                        if search_for_ordering_only
-                        else [],
+                        loaded_user_files=(
+                            user_files if search_for_ordering_only else []
+                        ),
                     )
 
                     # If we're using search just for ordering user files
@@ -1109,9 +1111,6 @@ def stream_chat_message_objects(
                         logger.info(
                             f"ORDERING: Processing search results for ordering {len(user_files)} user files"
                         )
-                        import time
-
-                        ordering_start = time.time()
 
                         # Extract document order from search results
                         doc_order = []
@@ -1146,8 +1145,6 @@ def stream_chat_message_objects(
                             for f_id in doc_order
                             if f_id in file_id_to_user_file
                         ]
-
-                        time.time() - ordering_start
 
                         yield UserKnowledgeFilePacket(
                             user_files=[
@@ -1360,16 +1357,18 @@ def stream_chat_message_objects(
             error=ERROR_TYPE_CANCELLED if answer.is_cancelled() else None,
             tool_call=(
                 ToolCall(
-                    tool_id=tool_name_to_tool_id.get(info.tool_result.tool_name, 0)
-                    if info.tool_result
-                    else None,
+                    tool_id=(
+                        tool_name_to_tool_id.get(info.tool_result.tool_name, 0)
+                        if info.tool_result
+                        else None
+                    ),
                     tool_name=info.tool_result.tool_name if info.tool_result else None,
-                    tool_arguments=info.tool_result.tool_args
-                    if info.tool_result
-                    else None,
-                    tool_result=info.tool_result.tool_result
-                    if info.tool_result
-                    else None,
+                    tool_arguments=(
+                        info.tool_result.tool_args if info.tool_result else None
+                    ),
+                    tool_result=(
+                        info.tool_result.tool_result if info.tool_result else None
+                    ),
                 )
                 if info.tool_result
                 else None
@@ -1399,9 +1398,11 @@ def stream_chat_message_objects(
                 db_session=db_session,
                 files=info.ai_message_files,
                 reference_docs=info.reference_db_search_docs,
-                citations=info.message_specific_citations.citation_map
-                if info.message_specific_citations
-                else None,
+                citations=(
+                    info.message_specific_citations.citation_map
+                    if info.message_specific_citations
+                    else None
+                ),
                 error=ERROR_TYPE_CANCELLED if answer.is_cancelled() else None,
                 refined_answer_improvement=refined_answer_improvement,
                 is_agentic=True,
@@ -1436,6 +1437,7 @@ def stream_chat_message(
     custom_tool_additional_headers: dict[str, str] | None = None,
     is_connected: Callable[[], bool] | None = None,
 ) -> Iterator[str]:
+    start_time = time.time()
     with get_session_context_manager() as db_session:
         objects = stream_chat_message_objects(
             new_msg_req=new_msg_req,
@@ -1446,6 +1448,11 @@ def stream_chat_message(
             is_connected=is_connected,
         )
         for obj in objects:
+            # Check if this is a QADocsResponse with document results
+            if isinstance(obj, QADocsResponse):
+                document_retrieval_latency = time.time() - start_time
+                logger.debug(f"First doc time: {document_retrieval_latency}")
+
             yield get_json_line(obj.model_dump())
 
 
