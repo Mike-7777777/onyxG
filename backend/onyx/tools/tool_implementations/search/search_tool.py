@@ -145,8 +145,11 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
 
         # For small context models, don't include additional surrounding context
         # The 3 here for at least minimum 1 above, 1 below and 1 for the middle chunk
-        max_llm_tokens = compute_max_llm_input_tokens(self.llm.config)
-        if max_llm_tokens < 3 * GEN_AI_MODEL_FALLBACK_MAX_TOKENS:
+
+        max_input_tokens = compute_max_llm_input_tokens(
+            llm_config=llm.config,
+        )
+        if max_input_tokens < 3 * GEN_AI_MODEL_FALLBACK_MAX_TOKENS:
             self.chunks_above = 0
             self.chunks_below = 0
 
@@ -295,6 +298,7 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
         ordering_only = False
         document_sources = None
         time_cutoff = None
+        expanded_queries = None
         if override_kwargs:
             force_no_rerank = use_alt_not_None(override_kwargs.force_no_rerank, False)
             alternate_db_session = override_kwargs.alternate_db_session
@@ -307,6 +311,7 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
             ordering_only = use_alt_not_None(override_kwargs.ordering_only, False)
             document_sources = override_kwargs.document_sources
             time_cutoff = override_kwargs.time_cutoff
+            expanded_queries = override_kwargs.expanded_queries
 
         # Fast path for ordering-only search
         if ordering_only:
@@ -391,6 +396,8 @@ class SearchTool(Tool[SearchToolOverrideKwargs]):
                 precomputed_query_embedding=precomputed_query_embedding,
                 precomputed_is_keyword=precomputed_is_keyword,
                 precomputed_keywords=precomputed_keywords,
+                # add expanded queries
+                expanded_queries=expanded_queries,
             ),
             user=self.user,
             llm=self.llm,

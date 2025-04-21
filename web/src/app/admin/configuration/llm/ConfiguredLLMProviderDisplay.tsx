@@ -8,7 +8,7 @@ import { LLM_PROVIDERS_ADMIN_URL } from "./constants";
 import { mutate } from "swr";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import isEqual from "lodash/isEqual";
+import { isSubset } from "@/lib/utils";
 
 function LLMProviderUpdateModal({
   llmProviderDescriptor,
@@ -29,12 +29,11 @@ function LLMProviderUpdateModal({
       llmProviderDescriptor?.name ||
       "Custom LLM Provider";
 
-  const hasAdvancedOptions = llmProviderDescriptor?.name != "azure";
-
   return (
     <Modal
       title={`${llmProviderDescriptor ? "Configure" : "Setup"} ${providerName}`}
       onOutsideClick={() => onClose()}
+      hideOverflow={true}
     >
       <div className="max-h-[70vh] overflow-y-auto px-4">
         {llmProviderDescriptor ? (
@@ -44,7 +43,6 @@ function LLMProviderUpdateModal({
             existingLlmProvider={existingLlmProvider}
             shouldMarkAsDefault={shouldMarkAsDefault}
             setPopup={setPopup}
-            hasAdvancedOptions={hasAdvancedOptions}
           />
         ) : (
           <CustomLLMProviderUpdateForm
@@ -178,7 +176,14 @@ export function ConfiguredLLMProviderDisplay({
             // then the provider is custom - don't use the default
             // provider descriptor
             llmProviderDescriptor={
-              isEqual(provider.model_names, defaultProviderDesciptor?.llm_names)
+              isSubset(
+                defaultProviderDesciptor
+                  ? defaultProviderDesciptor.llm_names
+                  : [],
+                provider.model_configurations.map(
+                  (model_configuration) => model_configuration.name
+                )
+              )
                 ? defaultProviderDesciptor
                 : null
             }

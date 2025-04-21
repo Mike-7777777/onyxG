@@ -23,6 +23,7 @@ class ConnectorManager:
         access_type: AccessType = AccessType.PUBLIC,
         groups: list[int] | None = None,
         user_performing_action: DATestUser | None = None,
+        refresh_freq: int | None = None,
     ) -> DATestConnector:
         name = f"{name}-connector" if name else f"test-connector-{uuid4()}"
 
@@ -32,10 +33,15 @@ class ConnectorManager:
             input_type=input_type,
             connector_specific_config=(
                 connector_specific_config
-                or ({"file_locations": []} if source == DocumentSource.FILE else {})
+                or (
+                    {"file_locations": [], "zip_metadata": {}}
+                    if source == DocumentSource.FILE
+                    else {}
+                )
             ),
             access_type=access_type,
             groups=groups or [],
+            refresh_freq=refresh_freq,
         )
 
         response = requests.post(
